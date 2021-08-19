@@ -1,14 +1,19 @@
 import numpy as np
-import tensorflow as tf
 import matplotlib.pyplot as plt
 
-from tensorflow.keras import layers
+from tensorflow.keras import layers, metrics
 from tensorflow.keras.models import Model
 
-from PIL import Image
 import configparser
-import glob
-from sklearn.model_selection import train_test_split
+
+from tensorflow.python.keras.callbacks import ModelCheckpoint
+
+from eager_data import DataGenerator
+
+import ml_utils
+import os
+from datetime import datetime
+import telebot
 
 def get_model(input_shape = (512,512,1)):
     i = layers.Input(shape=input_shape)
@@ -28,17 +33,6 @@ def get_config():
     config.read('../config.ini')
     return config
 
-def get_images(path, images_count, target_size = (512,512)):
-    images = glob.glob(path)[:images_count]
-    return [load_image(img, target_size) for img in images]
-
-def load_image(path, target_size):
-    img = Image.open(path)
-    img = img.resize(target_size, Image.ANTIALIAS)
-    arr = np.array(img)
-    arr = arr.astype("float32") / 255.0
-    return np.reshape(arr, (*target_size, 1))
-    #return [np.expand_dims(np.array(img), axis=2)]
 def display(array1, array2):
     """
     Displays ten random images from each one of the supplied arrays.
@@ -66,24 +60,41 @@ def display(array1, array2):
 
     plt.show()
 if __name__ == "__main__":
-
+    
     config = get_config()
-    count = int(config['images']['count'])
-    size = int(config['images']['image_size'])
+    images_config = config['images']
+    telegram_config = config['telegram']
+    bot = telebot.TeleBot(telegram_config['token'])
+    count = int(images_config['count'])
+    size = int(images_config['image_size'])
     target_size = (size, size)
-    cover_train, cover_test = train_test_split(get_images(config['images']['stego_path'], count, target_size))
-    cover_train, cover_test = np.array(cover_train), np.array(cover_test)
+    stego_path = images_config['stego_path']
+    cover_path = images_config['cover_path']
+    save_path = images_config['save_path']
+    create_dir = bool(images_config['create_datetime_dir'])
+    if (create_dir):
+        now = datetime.now()
+        d1 = now.strftime("%d_%m_%Y_%H_%M_%S")
+        save_path = os.path.join(save_path, d1)
+        os.makedirs(save_path)
+    train_generator = DataGenerator(train_path=stego_path, test_path=cover_path, batch_size=16, shuffle=False, take = count)
+    validation_generator = DataGenerator(train_path=stego_path, test_path=cover_path, batch_size=16, shuffle=False, start_index= count, take = count)
     input_shape = (*target_size, 1)
 
     autoencoder = get_model(input_shape)
-    autoencoder.compile(optimizer="adam", loss="binary_crossentropy")
-    # display(cover_test, cover_test)
-    autoencoder.fit(
-        x = cover_train, 
-        y = cover_train,
-        epochs = 70,
+    autoencoder.compile(optimizer="adam", loss="binary_crossentropy", metrics=[
+                        metrics.MeanSquaredError()])
+    filepath = save_path + "/saved-model-ep_{epoch:02d}-loss_{loss:.2f}-val_loss_{val_loss:.2f}.hdf5"
+    
+    checkpoint = ModelCheckpoint(filepath, monitor='accuracy', verbose=1,
+        save_best_only=False, mode='auto', period=1)
+    
+    history = autoencoder.fit(
+        x = train_generator,
+        epochs = 200,
         batch_size = 16,
-        shuffle = True, 
-        validation_data = (cover_test, cover_test))
-    predictions = autoencoder.predict(cover_test)
-    # display(cover_test, predictions)
+        shuffle = False, 
+        validation_data = validation_generator,
+        callbacks=[checkpoint])
+    ml_utils.save_model_history_csv(history, os.path.join(save_path, 'history.csv'))
+    bot.send_message(chat_id=telegram_config['chat_id'], text=f'DAE training completed')
