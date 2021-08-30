@@ -27,12 +27,6 @@ def get_model(input_shape = (512,512,1)):
     x = layers.Conv2DTranspose(1, (1,1))(x)
     return Model(i, x)
 
-def get_config():
-    config = configparser.ConfigParser()
-    #config.read('../../config.ini')
-    config.read('../config.ini')
-    return config
-
 def display(array1, array2):
     """
     Displays ten random images from each one of the supplied arrays.
@@ -59,8 +53,10 @@ def display(array1, array2):
         ax.get_yaxis().set_visible(False)
 
     plt.show()
-if __name__ == "__main__":
-    
+
+from common import get_config
+
+def main():
     config = get_config()
     images_config = config['images']
     telegram_config = config['telegram']
@@ -72,6 +68,12 @@ if __name__ == "__main__":
     cover_path = images_config['cover_path']
     save_path = images_config['save_path']
     create_dir = bool(images_config['create_datetime_dir'])
+    load_model = bool(images_config['load_model'])
+    model_path = images_config['model_path']
+
+
+    chat_id = telegram_config['chat_id']
+
     if (create_dir):
         now = datetime.now()
         d1 = now.strftime("%d_%m_%Y_%H_%M_%S")
@@ -82,19 +84,30 @@ if __name__ == "__main__":
     input_shape = (*target_size, 1)
 
     autoencoder = get_model(input_shape)
-    autoencoder.compile(optimizer="adam", loss="binary_crossentropy", metrics=[
+    autoencoder.compile(optimizer="adadelta", loss="binary_crossentropy", metrics=[
                         metrics.MeanSquaredError()])
-    filepath = save_path + "/saved-model-ep_{epoch:02d}-loss_{loss:.2f}-val_loss_{val_loss:.2f}.hdf5"
+    if (load_model):
+        if (os.path.exists(model_path)):
+            print(f'Loading weights from \'{model_path}\'')
+            autoencoder.load_weights(model_path)
+        else:
+            message = 'Model path was not found! Exiting.'
+            print(message)
+            bot.send_message(chat_id=chat_id, message=message)
+            return
+    filepath = save_path + "/saved-model-ep_{epoch:02d}-loss_{loss:.5f}-val_loss_{val_loss:.5f}.hdf5"
     
     checkpoint = ModelCheckpoint(filepath, monitor='accuracy', verbose=1,
         save_best_only=False, mode='auto', period=1)
     
     history = autoencoder.fit(
         x = train_generator,
-        epochs = 200,
+        epochs = 1000,
         batch_size = 16,
-        shuffle = False, 
+        shuffle = False,    
         validation_data = validation_generator,
         callbacks=[checkpoint])
     ml_utils.save_model_history_csv(history, os.path.join(save_path, 'history.csv'))
-    bot.send_message(chat_id=telegram_config['chat_id'], text=f'DAE training completed')
+    bot.send_message(chat_id=chat_id, text=f'DAE training completed')
+if __name__ == "__main__":
+    main()
