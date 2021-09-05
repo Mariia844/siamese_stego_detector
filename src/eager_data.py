@@ -1,8 +1,9 @@
+from logging import debug
 from keras.utils import Sequence, to_categorical
 import numpy as np
 from glob import glob
 from PIL import Image
-
+import os
 from data_loading import DataLoader, ImageDataLoader
 
 class DataGenerator(Sequence):
@@ -228,3 +229,84 @@ class SiameseStegoEagerDataGenerator(EagerDataGenerator):
       labels = label
     super(SiameseStegoEagerDataGenerator, self).__init__(list_IDs, ImageDataLoader(image_size, 1), batch_size, image_size, 1, 2, shuffle)
 
+class StegoData:
+  def __init__(self, stego_path, stego_dae_path, cover_path, cover_dae_path, types = ["*.tif"]):
+    self.stego_path = stego_path
+    self.stego_dae_path = stego_dae_path
+    self.cover_path = cover_path
+    self.cover_dae_path = cover_dae_path
+    self.types = types
+
+    self.stego_paths = self.__get_paths(self.stego_path)
+    self.stego_dae_paths = self.__get_paths(self.stego_dae_path)
+    self.cover_paths = self.__get_paths(self.cover_path)
+    self.cover_dae_paths = self.__get_paths(self.cover_dae_path)
+
+    self.min_index = min(len(self.stego_paths), len(self.stego_dae_paths), len(self.cover_paths), len(self.cover_dae_paths))
+
+    # 0 
+    self.cover_paths = [self.cover_paths[:self.min_index], self.cover_dae_paths[:self.min_index]]
+    # 1
+    self.stego_paths = [self.stego_paths[:self.min_index], self.stego_dae_paths[:self.min_index]]
+
+  def __get_paths(self, path):
+    result = []
+    for type in self.types:
+      temp_result = glob(os.path.join(path, type))
+      if (len(temp_result) == 0):
+        raise AssertionError(f'Path {os.path.join(path, type)} is empty!')
+      temp_result.pop()
+      result.extend(temp_result)
+    return result
+  
+class TwoLegStegoDataGenerator(Sequence):
+  def __init__(self, stego_data : StegoData, data_loader : DataLoader, batch_size, shuffle = True):
+      self.stego_data = stego_data
+      self.data_loader = data_loader
+      self.batch_size = batch_size
+      self.shuffle = shuffle
+      self.on_epoch_end()
+
+  def __getitem__(self, index):
+      'Generate one batch of data'
+      # Generate indexes of the batch
+      indexes = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
+
+      # Find list of IDs
+      if index == 235:
+        ax = 2
+      result = [[], []]
+      labels = []
+      for idx in indexes:
+        label = 0
+        if idx >= (self.stego_data.min_index) - 1:
+          label = 1
+        # data_index = 
+        path1, path2 = None, None
+        if label == 0:
+          path1, path2 = self.stego_data.cover_paths[0][idx], self.stego_data.cover_paths[1][idx]
+        else:
+          path1, path2 = self.stego_data.stego_paths[0][idx - self.stego_data.min_index], self.stego_data.stego_paths[1][idx - self.stego_data.min_index]
+        result[0].append(self.data_loader.load(path1))
+        result[1].append(self.data_loader.load(path2))
+        labels.append([0,1] if label == 0 else [1,0])
+
+      # Generate data
+      # result[0] = np.array(result[0])
+      # result[1] = np.array(result[1])
+      result = ([np.array(x) for x in result], np.array(labels).astype('float32'))
+      if (result[0][0].shape == (0,)):
+        print('\n\nERROR SHAPE.\n\tRequested index: ', index, '\n\tLabels: ', labels, '\n\n\n')
+      return result
+  def on_epoch_end(self):
+      'Updates indexes after each epoch'
+      self.indexes = np.arange(self.stego_data.min_index*2)
+      if self.shuffle == True:
+          np.random.shuffle(self.indexes)
+  def __len__(self):
+    """Number of batch in the Sequence.
+
+    Returns:
+        The number of batches in the Sequence.
+    """
+    return int(np.floor(self.stego_data.min_index * 2 / self.batch_size))

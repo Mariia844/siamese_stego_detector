@@ -1,11 +1,16 @@
+from logging import debug
 import os
+from warnings import catch_warnings
 import telebot
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers, metrics
+from tensorflow.python.framework.ops import reset_default_graph
+from tensorflow.python.keras.metrics import TruePositives
 from common import get_config
 from tensorflow.python.keras.callbacks import ModelCheckpoint
-from eager_data import EagerDataGenerator, SiameseNetworkDataGenerator, SiameseStegoEagerDataGenerator
+from data_loading import ImageDataLoader
+from eager_data import EagerDataGenerator, SiameseNetworkDataGenerator, SiameseStegoEagerDataGenerator, StegoData, TwoLegStegoDataGenerator
 import ml_utils
 import numpy as np
 
@@ -51,7 +56,6 @@ def loss(margin=1):
       Returns:
           A tensor containing constrastive loss as floating point value.
       """
-
         square_pred = tf.math.square(y_pred)
         margin_square = tf.math.square(tf.math.maximum(margin - (y_pred), 0))
         return tf.math.reduce_mean(
@@ -59,6 +63,13 @@ def loss(margin=1):
         )
 
     return contrastive_loss
+
+def l1_loss():
+    def absolute_loss(y_pred, y_true):
+        return tf.math.reduce_mean(
+            tf.math.abs(y_true - y_pred)   
+        )
+    return absolute_loss
 
 def get_model():    
     input = layers.Input((512,512,1))
@@ -88,11 +99,13 @@ def get_model():
     x = layers.Lambda(euclidean_distance)([tower_1, tower_2])
     x = layers.Dense(100, activation='relu')(x)
     x = layers.Dropout(0.2)(x)
-    output_layer = layers.Dense(1, activation="sigmoid")(x)
+    output_layer = layers.Dense(2, activation="sigmoid")(x)
 
     siamese = keras.Model(inputs=[input_1, input_2], outputs=output_layer)
-    siamese.compile(optimizer="adadelta", loss=loss(0.5), metrics=[
+    siamese.compile(optimizer="adadelta", loss=l1_loss(), metrics=[
                         metrics.MeanSquaredError(),
+                        metrics.TruePositives(),
+                        metrics.TrueNegatives(),
                         metrics.FalseNegatives(),
                         metrics.FalsePositives(),
                         metrics.AUC()])
@@ -129,7 +142,7 @@ def random_generator_choise(gen1, gen2, length):
         yield result
 
 def append_extension(path, extension):
-    pass
+    return os.path.join(path, extension)
 
 def main():
     config = get_config()
@@ -151,48 +164,95 @@ def main():
     # data_generator = SiameseNetworkDataGenerator(paths_with_labels, 16, False)
     # data_generator_1 = SiameseNetworkDataGenerator(paths_with_labels, 16, False)
 
-    stego_training_path = os.path.join(stego_path, 'training') + '\\' + '*' + extension
-    stego_dae_training_path = os.path.join(stego_dae_path, 'training') + '\\' + '*' + extension
-    cover_training_path = os.path.join(cover_path, 'training') + '\\' + '*' + extension
-    cover_dae_training_path = os.path.join(cover_dae_path, 'training') + '\\' + '*' + extension
+
+
+    # + '\\' + '*' + extension
+
+    stego_training_path = os.path.join(stego_path, 'training') 
+    stego_dae_training_path = os.path.join(stego_dae_path, 'training') 
+    cover_training_path = os.path.join(cover_path, 'training') 
+    cover_dae_training_path = os.path.join(cover_dae_path, 'training') 
     
-    stego_validation_path = os.path.join(stego_path, 'validation') + '\\' + '*' + extension
-    stego_dae_validation_path = os.path.join(stego_dae_path, 'validation') + '\\' + '*' + extension
-    cover_validation_path = os.path.join(cover_path, 'validation') + '\\' + '*' + extension
-    cover_dae_validation_path = os.path.join(cover_dae_path, 'validation') + '\\' + '*' + extension
+    stego_validation_path = os.path.join(stego_path, 'validation') 
+    stego_dae_validation_path = os.path.join(stego_dae_path, 'validation') 
+    cover_validation_path = os.path.join(cover_path, 'validation') 
+    cover_dae_validation_path = os.path.join(cover_dae_path, 'validation') 
 
-    stego_generator = SiameseStegoEagerDataGenerator(stego_training_path, 1, (512,512), 16, False)   
-    stego_dae_generator = SiameseStegoEagerDataGenerator(stego_dae_training_path, 1, (512,512), 16, False)
-    stego_combined_generator = combine_generators(stego_generator, stego_dae_generator, np.full(stego_generator.id_length, 1))
-    cover_generator = SiameseStegoEagerDataGenerator(cover_training_path, 0, (512,512), 16, False)
-    cover_dae_generator = SiameseStegoEagerDataGenerator(cover_dae_training_path, 0, (512,512), 16, False)
-    cover_combined_generator = combine_generators(cover_generator, cover_dae_generator, np.full(stego_generator.id_length, 0))
-    combined_generator = random_generator_choise(stego_combined_generator, cover_combined_generator, stego_generator.id_length)
+    stego_train_data = StegoData(cover_path=cover_training_path, cover_dae_path=cover_dae_training_path, stego_path=stego_training_path, stego_dae_path=stego_dae_training_path)
+    stego_test_data = StegoData(cover_path=cover_validation_path, cover_dae_path=cover_dae_validation_path, stego_path=stego_validation_path, stego_dae_path=stego_dae_validation_path)
 
-    stego_validation_generator = SiameseStegoEagerDataGenerator(stego_validation_path, 1, (512,512), 16, False)   
-    stego_dae_validation_generator = SiameseStegoEagerDataGenerator(stego_dae_validation_path, 1, (512,512), 16, False)
-    stego_combined_validation_generator = combine_generators(stego_validation_generator, stego_dae_validation_generator, np.full(stego_validation_generator.id_length, 1))
-    cover_validation_generator = SiameseStegoEagerDataGenerator(cover_validation_path, 0, (512,512), 16, False)
-    cover_dae_validation_generator = SiameseStegoEagerDataGenerator(cover_dae_validation_path, 0, (512,512), 16, False)
-    cover_combined_validation_generator = combine_generators(cover_validation_generator, cover_dae_validation_generator, np.full(stego_validation_generator.id_length, 0))
-    combined_validation_generator = random_generator_choise(stego_combined_validation_generator, cover_combined_validation_generator, stego_validation_generator.id_length)
+    data_loader = ImageDataLoader((512,512), 1)
+    two_leg_train_generator = TwoLegStegoDataGenerator(stego_train_data, data_loader, 16, shuffle=True)
+    two_leg_test_generator = TwoLegStegoDataGenerator(stego_test_data, data_loader, 16, shuffle=True)
+
+    
+
+    # stego_generator = SiameseStegoEagerDataGenerator(append_extension(stego_training_path, extension), 1, (512,512), 16, False)   
+    # stego_dae_generator = SiameseStegoEagerDataGenerator(append_extension(stego_dae_training_path, extension), 1, (512,512), 16, False)
+    # stego_combined_generator = combine_generators(stego_generator, stego_dae_generator, np.full(stego_generator.id_length, 1))
+    # cover_generator = SiameseStegoEagerDataGenerator(append_extension(cover_training_path, extension), 0, (512,512), 16, False)
+    # cover_dae_generator = SiameseStegoEagerDataGenerator(append_extension(cover_dae_training_path, extension), 0, (512,512), 16, False)
+    # cover_combined_generator = combine_generators(cover_generator, cover_dae_generator, np.full(stego_generator.id_length, 0))
+    # combined_generator = random_generator_choise(stego_combined_generator, cover_combined_generator, stego_generator.id_length)
+
+    # stego_validation_generator = SiameseStegoEagerDataGenerator(append_extension(stego_validation_path, extension), 1, (512,512), 16, False)   
+    # stego_dae_validation_generator = SiameseStegoEagerDataGenerator(append_extension(stego_dae_validation_path, extension), 1, (512,512), 16, False)
+    # stego_combined_validation_generator = combine_generators(stego_validation_generator, stego_dae_validation_generator, np.full(stego_validation_generator.id_length, 1))
+    # cover_validation_generator = SiameseStegoEagerDataGenerator(append_extension(cover_validation_path, extension), 0, (512,512), 16, False)
+    # cover_dae_validation_generator = SiameseStegoEagerDataGenerator(append_extension(cover_dae_validation_path, extension), 0, (512,512), 16, False)
+    # cover_combined_validation_generator = combine_generators(cover_validation_generator, cover_dae_validation_generator, np.full(stego_validation_generator.id_length, 0))
+    # combined_validation_generator = random_generator_choise(stego_combined_validation_generator, cover_combined_validation_generator, stego_validation_generator.id_length)
+
+    
 
 
-    # next_batch = next(enumerate(stego_combined_generator))[1]
+    # next_batch = next(enumerate(combined_generator))[1]
+    # next_two_legged_batch = next(enumerate(two_leg_train_generator))[1]
     # pass
+    
     save_path = siamese_config['save_path']
     filepath = save_path + "/saved-model-ep_{epoch:02d}.hdf5"
     checkpoint = ModelCheckpoint(filepath, monitor='accuracy', verbose=1,
         save_best_only=False, mode='auto', period=1)
     siamese = get_model()
+    # history = siamese.fit(
+    #     combined_generator, #two_leg_train_generator,
+    #     validation_data = combined_validation_generator,#two_leg_test_generator,
+    #     epochs = 10,
+    #     batch_size = 16,
+    #     shuffle = False,
+    #     callbacks=[checkpoint])
+
+    siamese.summary()
+
+    # enumerator = enumerate(two_leg_train_generator)
+    # next_value = None
+    # while True:
+    #     next_value = next(enumerator, None)
+    #     if next_value == None:
+    #         break
+    #     if (next_value[1][0][0].shape == (0,)):
+    #         break
+    #     pass
+    # return
+
     history = siamese.fit(
-        combined_generator,
-        validation_data = combined_validation_generator,
-        epochs = 100,
+        two_leg_train_generator,
+        validation_data = two_leg_test_generator,
+        epochs = 150,
         batch_size = 16,
         shuffle = False,
         callbacks=[checkpoint])
-    ml_utils.save_model_history_csv(history, os.path.join(save_path, 'history.csv'))
+    try:
+        ml_utils.dump_object(history.history, os.path.join(save_path, 'history.dump'))
+        
+    except Exception as e:
+        print('Save pickle ERROR: ', e)
+    try:
+        ml_utils.save_model_history_csv(history, os.path.join(save_path, 'history.csv'))
+    except Exception as e:
+        print('Save csv ERROR: ', e)
+
     bot.send_message(chat_id=chat_id, text=f'Siamese training completed')
 
     # stego_path = images_config['stego_path']
