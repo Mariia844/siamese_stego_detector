@@ -3,6 +3,7 @@ from keras.utils import Sequence, to_categorical
 import numpy as np
 from glob import glob
 from PIL import Image
+import cv2
 import os
 from data_loading import DataLoader, ImageDataLoader
 
@@ -29,19 +30,25 @@ class DataGenerator(Sequence):
 
   def __len__(self):
     return int(self.train_length / self.batch_size)
-
+  
   def __getitem__(self, index):
     train, test = [], []
     self.train_paths, self.test_paths = [], []
     for i in range(index*self.batch_size, index*self.batch_size+self.batch_size):
         train_path = self.train_images_paths[self.index[i]]
         test_path = self.test_images_paths[self.index[i]]
-        train_image = Image.open(train_path)
-        test_image = Image.open(test_path)
+        # train_pil_image = Image.open(train_path)
+        # test_pil_image = Image.open(test_path)
+        # train_pil_image.load()
+        # test_pil_image.load()
+        # train_image = train_pil_image.copy()
+        # test_image = test_pil_image.copy()
+        test_image = cv2.imread(train_path, cv2.IMREAD_GRAYSCALE)
+        train_image = cv2.imread(test_path, cv2.IMREAD_GRAYSCALE)
         self.train_paths.append(train_path)
         self.test_paths.append(test_path)
-        train_image = np.array(train_image.resize((512,512), Image.ANTIALIAS))
-        test_image = np.array(test_image.resize((512,512), Image.ANTIALIAS))
+        # train_image = np.array(train_image.resize((512,512), Image.ANTIALIAS))
+        # test_image = np.array(test_image.resize((512,512), Image.ANTIALIAS))
 
         train_image = train_image.astype("float32") / 255.0
         test_image = test_image.astype("float32") / 255.0

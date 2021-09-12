@@ -239,16 +239,20 @@ def main():
     history = siamese.fit(
         two_leg_train_generator,
         validation_data = two_leg_test_generator,
-        epochs = 150,
+        epochs = 300,
         batch_size = 16,
         shuffle = False,
         callbacks=[checkpoint])
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
     try:
         ml_utils.dump_object(history.history, os.path.join(save_path, 'history.dump'))
         
     except Exception as e:
         print('Save pickle ERROR: ', e)
     try:
+        import win32file
+        win32file._setmaxstdio(2048)
         ml_utils.save_model_history_csv(history, os.path.join(save_path, 'history.csv'))
     except Exception as e:
         print('Save csv ERROR: ', e)

@@ -54,7 +54,7 @@ def display(array1, array2):
 
     plt.show()
 
-from common import get_config
+from common import get_config, str2bool
 
 def main():
     config = get_config()
@@ -67,10 +67,13 @@ def main():
     stego_path = images_config['stego_path']
     cover_path = images_config['cover_path']
     save_path = images_config['save_path']
-    create_dir = bool(images_config['create_datetime_dir'])
-    load_model = bool(images_config['load_model'])
+    create_dir = str2bool(images_config['create_datetime_dir'])
+    load_model = str2bool(images_config['load_model'])
+    epochs = int(images_config['epochs'])
+    batch_size = int(images_config['batch_size'])
     model_path = images_config['model_path']
-
+    import win32file
+    win32file._setmaxstdio(2048)
 
     chat_id = telegram_config['chat_id']
 
@@ -93,17 +96,17 @@ def main():
         else:
             message = 'Model path was not found! Exiting.'
             print(message)
-            bot.send_message(chat_id=chat_id, message=message)
+            bot.send_message(chat_id=chat_id, text=message)
             return
-    filepath = save_path + "/saved-model-ep_{epoch:02d}-loss_{loss:.5f}-val_loss_{val_loss:.5f}.hdf5"
+    filepath = save_path + "/saved-model-ep_{epoch:02d}-loss_{loss:.5f}.hdf5"
     
     checkpoint = ModelCheckpoint(filepath, monitor='accuracy', verbose=1,
         save_best_only=False, mode='auto', period=1)
     
     history = autoencoder.fit(
         x = train_generator,
-        epochs = 1000,
-        batch_size = 16,
+        epochs = epochs,
+        batch_size = batch_size,
         shuffle = False,    
         validation_data = validation_generator,
         callbacks=[checkpoint])
