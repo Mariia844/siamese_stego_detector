@@ -1,89 +1,65 @@
-import numpy as np
-import tensorflow as tf
-import matplotlib.pyplot as plt
+from numpy.lib.npyio import save
+from tensorflow.python.keras.callbacks import ModelCheckpoint
 
-from tensorflow.keras import layers
-from tensorflow.keras.models import Model
+from eager_data import DataGenerator
 
-from PIL import Image
-import configparser
-import glob
-from sklearn.model_selection import train_test_split
+import ml_utils
+import os
+from datetime import datetime
+import common
+from autoencoder.model import get_compiled_model, get_compiled_model_with_weights
 
-def get_model(input_shape = (512,512,1)):
-    i = layers.Input(shape=input_shape)
+import win32file
+win32file._setmaxstdio(2048)
 
-    x = layers.Conv2D(4, (7, 7))(i)
-    x = layers.Conv2D(10, (5,5))(x)
-    x = layers.Conv2D(20, (3,3))(x)
-    x = layers.Conv2DTranspose(20, (3,3))(x)
-    x = layers.Conv2DTranspose(10, (5,5))(x)
-    x = layers.Conv2DTranspose(4, (7,7))(x)
-    x = layers.Conv2DTranspose(1, (1,1))(x)
-    return Model(i, x)
-
-def get_config():
-    config = configparser.ConfigParser()
-    #config.read('../../config.ini')
-    config.read('../config.ini')
-    return config
-
-def get_images(path, images_count, target_size = (512,512)):
-    images = glob.glob(path)[:images_count]
-    return [load_image(img, target_size) for img in images]
-
-def load_image(path, target_size):
-    img = Image.open(path)
-    img = img.resize(target_size, Image.ANTIALIAS)
-    arr = np.array(img)
-    arr = arr.astype("float32") / 255.0
-    return np.reshape(arr, (*target_size, 1))
-    #return [np.expand_dims(np.array(img), axis=2)]
-def display(array1, array2):
-    """
-    Displays ten random images from each one of the supplied arrays.
-    """
-
-    n = 10
-
-    indices = np.random.randint(len(array1), size=n)
-    images1 = array1[indices, :]
-    images2 = array2[indices, :]
-
-    plt.figure(figsize=(20, 4))
-    for i, (image1, image2) in enumerate(zip(images1, images2)):
-        ax = plt.subplot(2, n, i + 1)
-        plt.imshow(image1.reshape(512, 512))
-        plt.gray()
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False)
-
-        ax = plt.subplot(2, n, i + 1 + n)
-        plt.imshow(image2.reshape(512, 512))
-        plt.gray()
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False)
-
-    plt.show()
-if __name__ == "__main__":
-
-    config = get_config()
-    count = int(config['images']['count'])
-    size = int(config['images']['image_size'])
+def main():
+    config = common.get_config()
+    images_config = config['images']
+    count = int(images_config['count'])
+    size = int(images_config['image_size'])
     target_size = (size, size)
-    cover_train, cover_test = train_test_split(get_images(config['images']['stego_path'], count, target_size))
-    cover_train, cover_test = np.array(cover_train), np.array(cover_test)
+    stego_path = images_config['stego_path']
+    cover_path = images_config['cover_path']
+    save_path = images_config['save_path']
+    create_dir = common.str2bool(images_config['create_datetime_dir'])
+    load_model = common.str2bool(images_config['load_model'])
+    epochs = int(images_config['epochs'])
+    batch_size = int(images_config['batch_size'])
+    model_path = images_config['model_path']
+    if (create_dir):
+        now = datetime.now()
+        d1 = now.strftime("%d_%m_%Y_%H_%M_%S")
+        save_path = os.path.join(save_path, d1)
+        os.makedirs(save_path)
+    train_generator = DataGenerator(train_path=stego_path, test_path=cover_path, batch_size=16, shuffle=False, take = count)
+    validation_generator = DataGenerator(train_path=stego_path, test_path=cover_path, batch_size=16, shuffle=False, start_index= count, take = count)
     input_shape = (*target_size, 1)
 
-    autoencoder = get_model(input_shape)
-    autoencoder.compile(optimizer="adam", loss="binary_crossentropy")
-    # display(cover_test, cover_test)
-    autoencoder.fit(
-        x = cover_train, 
-        y = cover_train,
-        epochs = 70,
-        batch_size = 16,
-        shuffle = True, 
-        validation_data = (cover_test, cover_test))
-    predictions = autoencoder.predict(cover_test)
-    # display(cover_test, predictions)
+    autoencoder = None
+
+    if load_model:
+        autoencoder = get_compiled_model_with_weights(model_path, input_shape)
+    else:
+        autoencoder = get_compiled_model(input_shape)
+    filepath = save_path + "/saved-model-ep_{epoch:02d}-loss_{loss:.5f}.hdf5"
+    
+    checkpoint = ModelCheckpoint(filepath, monitor='accuracy', verbose=1,
+        save_best_only=False, mode='auto', period=1)
+    
+    history = autoencoder.fit(
+        x = train_generator,
+        epochs = epochs,
+        batch_size = batch_size,
+        shuffle = False,    
+        validation_data = validation_generator,
+        callbacks=[checkpoint])
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    
+    ml_utils.save_model_history_csv(history, os.path.join(save_path, 'history.csv'))
+    common.send_message(text=f'DAE training completed')
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        common.send_message(e)
