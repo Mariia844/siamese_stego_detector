@@ -13,7 +13,14 @@ from datetime import datetime
 import telebot
 
 config = get_config()['telegram']
-bot = telebot.TeleBot(config['token'])
+bot = None
+try:
+  bot = telebot.TeleBot(config['token'])
+except:
+  pass
 
 def send_message(text: str):
-  bot.send_message(chat_id=config['chat_id'], text=text)
+  if not bot is None:
+    bot.send_message(chat_id=config['chat_id'], text=text)
+  else:
+    print(f'MESSAGE: {text}')
