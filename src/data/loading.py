@@ -1,14 +1,20 @@
 import numpy as np
 from PIL import Image
 import cv2
-
+from common import bot
 
 
 class DataLoader():
   def load(self, id: str):
     return np.load(id)
-
-
+import os
+class SimpleImageDataLoader(DataLoader):
+  def __init__(self, image_size : tuple):
+    self.image_size = image_size
+  def load(self, id: str):
+    if not os.path.exists(id):
+      raise FileNotFoundError(id)
+    return cv2.imread(id, cv2.IMREAD_GRAYSCALE)
 
 class ImageDataLoader(DataLoader):
   def __init__(self, image_size : tuple, n_channels: int):

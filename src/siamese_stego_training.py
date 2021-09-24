@@ -9,13 +9,14 @@ from tensorflow.python.framework.ops import reset_default_graph
 from tensorflow.python.keras.metrics import TruePositives
 from common import get_config
 from tensorflow.python.keras.callbacks import ModelCheckpoint
-from data_loading import ImageDataLoader
+from data_loading import ImageDataLoader, OpenCVImageDataLoader
 from eager_data import EagerDataGenerator, SiameseNetworkDataGenerator, SiameseStegoEagerDataGenerator, StegoData, TwoLegStegoDataGenerator
 import ml_utils
 import numpy as np
+import common
 
 # Provided two tensors t1 and t2
-# Euclidean distance = sqrt(sum(square(t1-t2)))
+
 def euclidean_distance(vects):
     """Find the Euclidean distance between two vectors.
 
@@ -26,11 +27,18 @@ def euclidean_distance(vects):
         Tensor containing euclidean distance
         (as floating point value) between vectors.
     """
-
     x, y = vects
     sum_square = tf.math.reduce_sum(tf.math.square(x - y), axis=1, keepdims=True)
     return tf.math.sqrt(tf.math.maximum(sum_square, tf.keras.backend.epsilon()))
 
+def l1_distance(vects):
+    x, y = vects
+    sum_square = tf.math.reduce_sum(tf.math.abs(x - y), axis=1, keepdims=True)
+    return tf.math.abs(tf.math.maximum(sum_square, tf.keras.backend.epsilon()))
+
+def l1_distance_v2(vects):
+    x, y = vects
+    return tf.math.abs(x - y)
 
 def loss(margin=1):
     """Provides 'constrastive_loss' an enclosing scope with variable 'margin'.
@@ -96,13 +104,13 @@ def get_model():
     tower_1 = embedding_network(input_1)
     tower_2 = embedding_network(input_2)
 
-    x = layers.Lambda(euclidean_distance)([tower_1, tower_2])
+    x = layers.Lambda(l1_distance_v2)([tower_1, tower_2])
     x = layers.Dense(100, activation='relu')(x)
     x = layers.Dropout(0.2)(x)
     output_layer = layers.Dense(2, activation="sigmoid")(x)
 
     siamese = keras.Model(inputs=[input_1, input_2], outputs=output_layer)
-    siamese.compile(optimizer="adadelta", loss=l1_loss(), metrics=[
+    siamese.compile(optimizer="adadelta", loss=loss(margin=0.5), metrics=[
                         metrics.MeanSquaredError(),
                         metrics.TruePositives(),
                         metrics.TrueNegatives(),
@@ -146,28 +154,14 @@ def append_extension(path, extension):
 
 def main():
     config = get_config()
-    images_config = config['images']
     telegram_config = config['telegram']
     siamese_config = config['siamese']
-    bot = telebot.TeleBot(telegram_config['token'])
-    chat_id = telegram_config['chat_id']
     stego_path = siamese_config['stego_path']
     stego_dae_path = siamese_config['stego_dae_path']
     cover_path = siamese_config['cover_path']
     cover_dae_path = siamese_config['cover_dae_path']
+
     extension = siamese_config['extension']
-
-    # paths_with_labels = [
-    #     [[stego_path, stego_dae_path], [1]],
-    #     [[cover_path, cover_dae_path], [0]],
-    # ]
-    # data_generator = SiameseNetworkDataGenerator(paths_with_labels, 16, False)
-    # data_generator_1 = SiameseNetworkDataGenerator(paths_with_labels, 16, False)
-
-
-
-    # + '\\' + '*' + extension
-
     stego_training_path = os.path.join(stego_path, 'training') 
     stego_dae_training_path = os.path.join(stego_dae_path, 'training') 
     cover_training_path = os.path.join(cover_path, 'training') 
@@ -178,93 +172,49 @@ def main():
     cover_validation_path = os.path.join(cover_path, 'validation') 
     cover_dae_validation_path = os.path.join(cover_dae_path, 'validation') 
 
-    stego_train_data = StegoData(cover_path=cover_training_path, cover_dae_path=cover_dae_training_path, stego_path=stego_training_path, stego_dae_path=stego_dae_training_path)
-    stego_test_data = StegoData(cover_path=cover_validation_path, cover_dae_path=cover_dae_validation_path, stego_path=stego_validation_path, stego_dae_path=stego_dae_validation_path)
+    stego_train_data = StegoData(
+        cover_path=cover_training_path,
+        cover_dae_path=cover_dae_training_path, 
+        stego_path=stego_training_path, 
+        stego_dae_path=stego_dae_training_path,
+        types=[extension])
+    stego_test_data = StegoData(
+        cover_path=cover_validation_path, 
+        cover_dae_path=cover_dae_validation_path, 
+        stego_path=stego_validation_path, 
+        stego_dae_path=stego_dae_validation_path,
+        types=[extension])
 
-    data_loader = ImageDataLoader((512,512), 1)
+    # data_loader = OpenCVImageDataLoader((512,512), 1)
+    data_loader = ImageDataLoader((512,512), 1) 
     two_leg_train_generator = TwoLegStegoDataGenerator(stego_train_data, data_loader, 16, shuffle=True)
     two_leg_test_generator = TwoLegStegoDataGenerator(stego_test_data, data_loader, 16, shuffle=True)
-
-    
-
-    # stego_generator = SiameseStegoEagerDataGenerator(append_extension(stego_training_path, extension), 1, (512,512), 16, False)   
-    # stego_dae_generator = SiameseStegoEagerDataGenerator(append_extension(stego_dae_training_path, extension), 1, (512,512), 16, False)
-    # stego_combined_generator = combine_generators(stego_generator, stego_dae_generator, np.full(stego_generator.id_length, 1))
-    # cover_generator = SiameseStegoEagerDataGenerator(append_extension(cover_training_path, extension), 0, (512,512), 16, False)
-    # cover_dae_generator = SiameseStegoEagerDataGenerator(append_extension(cover_dae_training_path, extension), 0, (512,512), 16, False)
-    # cover_combined_generator = combine_generators(cover_generator, cover_dae_generator, np.full(stego_generator.id_length, 0))
-    # combined_generator = random_generator_choise(stego_combined_generator, cover_combined_generator, stego_generator.id_length)
-
-    # stego_validation_generator = SiameseStegoEagerDataGenerator(append_extension(stego_validation_path, extension), 1, (512,512), 16, False)   
-    # stego_dae_validation_generator = SiameseStegoEagerDataGenerator(append_extension(stego_dae_validation_path, extension), 1, (512,512), 16, False)
-    # stego_combined_validation_generator = combine_generators(stego_validation_generator, stego_dae_validation_generator, np.full(stego_validation_generator.id_length, 1))
-    # cover_validation_generator = SiameseStegoEagerDataGenerator(append_extension(cover_validation_path, extension), 0, (512,512), 16, False)
-    # cover_dae_validation_generator = SiameseStegoEagerDataGenerator(append_extension(cover_dae_validation_path, extension), 0, (512,512), 16, False)
-    # cover_combined_validation_generator = combine_generators(cover_validation_generator, cover_dae_validation_generator, np.full(stego_validation_generator.id_length, 0))
-    # combined_validation_generator = random_generator_choise(stego_combined_validation_generator, cover_combined_validation_generator, stego_validation_generator.id_length)
-
-    
-
-
-    # next_batch = next(enumerate(combined_generator))[1]
-    # next_two_legged_batch = next(enumerate(two_leg_train_generator))[1]
-    # pass
     
     save_path = siamese_config['save_path']
     filepath = save_path + "/saved-model-ep_{epoch:02d}.hdf5"
     checkpoint = ModelCheckpoint(filepath, monitor='accuracy', verbose=1,
         save_best_only=False, mode='auto', period=1)
+    # print_callback = ml_utils.PrintCallback()
+    save_callback = ml_utils.SaveStatsCallback(history_path=os.path.join(save_path, 'history.csv'))
     siamese = get_model()
-    # history = siamese.fit(
-    #     combined_generator, #two_leg_train_generator,
-    #     validation_data = combined_validation_generator,#two_leg_test_generator,
-    #     epochs = 10,
-    #     batch_size = 16,
-    #     shuffle = False,
-    #     callbacks=[checkpoint])
-
-    siamese.summary()
-
-    # enumerator = enumerate(two_leg_train_generator)
-    # next_value = None
-    # while True:
-    #     next_value = next(enumerator, None)
-    #     if next_value == None:
-    #         break
-    #     if (next_value[1][0][0].shape == (0,)):
-    #         break
-    #     pass
-    # return
-
+    # siamese.summary()
     history = siamese.fit(
         two_leg_train_generator,
         validation_data = two_leg_test_generator,
-        epochs = 300,
+        epochs = 400,
         batch_size = 16,
-        shuffle = False,
-        callbacks=[checkpoint])
+        shuffle = True,
+        callbacks=[checkpoint, save_callback])
+    import win32file
+    win32file._setmaxstdio(2048)
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     try:
-        ml_utils.dump_object(history.history, os.path.join(save_path, 'history.dump'))
-        
-    except Exception as e:
-        print('Save pickle ERROR: ', e)
-    try:
-        import win32file
-        win32file._setmaxstdio(2048)
-        ml_utils.save_model_history_csv(history, os.path.join(save_path, 'history.csv'))
+        ml_utils.save_model_history_csv(history, os.path.join(save_path, 'history_full.csv'))
     except Exception as e:
         print('Save csv ERROR: ', e)
 
-    bot.send_message(chat_id=chat_id, text=f'Siamese training completed')
-
-    # stego_path = images_config['stego_path']
-    # cover_path = images_config['cover_path']
-    # save_path = images_config['save_path']
-    # create_dir = bool(images_config['create_datetime_dir'])
-    # load_model = bool(images_config['load_model'])
-    # model_path = images_config['model_path']
+    common.send_message(text=f'Siamese training completed')
 
 if __name__ == "__main__":
     main()

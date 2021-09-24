@@ -1,11 +1,4 @@
-import numpy as np
-import matplotlib.pyplot as plt
-
-from tensorflow.keras import layers, metrics
-from tensorflow.keras.models import Model
-
-import configparser
-
+from numpy.lib.npyio import save
 from tensorflow.python.keras.callbacks import ModelCheckpoint
 
 from eager_data import DataGenerator
@@ -13,70 +6,26 @@ from eager_data import DataGenerator
 import ml_utils
 import os
 from datetime import datetime
-import telebot
+import common
+from autoencoder.model import get_compiled_model, get_compiled_model_with_weights
 
-def get_model(input_shape = (512,512,1)):
-    i = layers.Input(shape=input_shape)
-
-    x = layers.Conv2D(4, (7, 7))(i)
-    x = layers.Conv2D(10, (5,5))(x)
-    x = layers.Conv2D(20, (3,3))(x)
-    x = layers.Conv2DTranspose(20, (3,3))(x)
-    x = layers.Conv2DTranspose(10, (5,5))(x)
-    x = layers.Conv2DTranspose(4, (7,7))(x)
-    x = layers.Conv2DTranspose(1, (1,1))(x)
-    return Model(i, x)
-
-def display(array1, array2):
-    """
-    Displays ten random images from each one of the supplied arrays.
-    """
-
-    n = 10
-
-    indices = np.random.randint(len(array1), size=n)
-    images1 = array1[indices, :]
-    images2 = array2[indices, :]
-
-    plt.figure(figsize=(20, 4))
-    for i, (image1, image2) in enumerate(zip(images1, images2)):
-        ax = plt.subplot(2, n, i + 1)
-        plt.imshow(image1.reshape(512, 512))
-        plt.gray()
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False)
-
-        ax = plt.subplot(2, n, i + 1 + n)
-        plt.imshow(image2.reshape(512, 512))
-        plt.gray()
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False)
-
-    plt.show()
-
-from common import get_config, str2bool
+import win32file
+win32file._setmaxstdio(2048)
 
 def main():
-    config = get_config()
+    config = common.get_config()
     images_config = config['images']
-    telegram_config = config['telegram']
-    bot = telebot.TeleBot(telegram_config['token'])
     count = int(images_config['count'])
     size = int(images_config['image_size'])
     target_size = (size, size)
     stego_path = images_config['stego_path']
     cover_path = images_config['cover_path']
     save_path = images_config['save_path']
-    create_dir = str2bool(images_config['create_datetime_dir'])
-    load_model = str2bool(images_config['load_model'])
+    create_dir = common.str2bool(images_config['create_datetime_dir'])
+    load_model = common.str2bool(images_config['load_model'])
     epochs = int(images_config['epochs'])
     batch_size = int(images_config['batch_size'])
     model_path = images_config['model_path']
-    import win32file
-    win32file._setmaxstdio(2048)
-
-    chat_id = telegram_config['chat_id']
-
     if (create_dir):
         now = datetime.now()
         d1 = now.strftime("%d_%m_%Y_%H_%M_%S")
@@ -86,18 +35,12 @@ def main():
     validation_generator = DataGenerator(train_path=stego_path, test_path=cover_path, batch_size=16, shuffle=False, start_index= count, take = count)
     input_shape = (*target_size, 1)
 
-    autoencoder = get_model(input_shape)
-    autoencoder.compile(optimizer="adadelta", loss="binary_crossentropy", metrics=[
-                        metrics.MeanSquaredError()])
-    if (load_model):
-        if (os.path.exists(model_path)):
-            print(f'Loading weights from \'{model_path}\'')
-            autoencoder.load_weights(model_path)
-        else:
-            message = 'Model path was not found! Exiting.'
-            print(message)
-            bot.send_message(chat_id=chat_id, text=message)
-            return
+    autoencoder = None
+
+    if load_model:
+        autoencoder = get_compiled_model_with_weights(model_path, input_shape)
+    else:
+        autoencoder = get_compiled_model(input_shape)
     filepath = save_path + "/saved-model-ep_{epoch:02d}-loss_{loss:.5f}.hdf5"
     
     checkpoint = ModelCheckpoint(filepath, monitor='accuracy', verbose=1,
@@ -110,7 +53,13 @@ def main():
         shuffle = False,    
         validation_data = validation_generator,
         callbacks=[checkpoint])
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    
     ml_utils.save_model_history_csv(history, os.path.join(save_path, 'history.csv'))
-    bot.send_message(chat_id=chat_id, text=f'DAE training completed')
+    common.send_message(text=f'DAE training completed')
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        common.send_message(e)
