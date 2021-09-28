@@ -79,8 +79,10 @@ def l1_loss():
         )
     return absolute_loss
 
-def get_model():    
-    input = layers.Input((512,512,1))
+def get_siamese_network(input_shape : tuple = (512,512,1), dae_input: keras.Model = None) -> keras.Model:
+    input = dae_input
+    if input == None:
+        input = layers.Input(input_shape)
     x = layers.Conv2D(16, (7, 7), activation="tanh", strides=(2,2))(input)
     x = tf.keras.layers.BatchNormalization()(x)
     x = layers.Conv2D(32, (5, 5), activation="tanh")(x)
@@ -110,6 +112,10 @@ def get_model():
     output_layer = layers.Dense(2, activation="sigmoid")(x)
 
     siamese = keras.Model(inputs=[input_1, input_2], outputs=output_layer)
+    return siamese
+
+def get_model(input_shape : tuple = (512,512,1)):    
+    siamese = get_siamese_network(input_shape)
     siamese.compile(optimizer="adadelta", loss=loss(margin=0.5), metrics=[
                         metrics.MeanSquaredError(),
                         metrics.TruePositives(),

@@ -3,7 +3,7 @@ from tensorflow.keras.models import Model
 import os
 import logging 
 
-def get_autoencoder(input_shape = (512,512,1)):
+def get_autoencoder(input_shape = (512,512,1)) -> Model:
     i = layers.Input(shape=input_shape)
 
     x = layers.Conv2D(4, (7, 7))(i)
@@ -12,11 +12,11 @@ def get_autoencoder(input_shape = (512,512,1)):
     x = layers.Conv2DTranspose(20, (3,3))(x)
     x = layers.Conv2DTranspose(10, (5,5))(x)
     x = layers.Conv2DTranspose(4, (7,7))(x)
-    x = layers.Conv2DTranspose(1, (1,1))(x)
-    return Model(i, x)
+    x = layers.Conv2DTranspose(1, (1,1), name="conv2d_last")(x)
+    return Model(i, x) 
 
 def get_compiled_model(input_shape = (512,512,1)):
-    model = get_autoencoder(input_shape) 
+    model = get_autoencoder(input_shape)
     model.compile(optimizer="adadelta", loss="binary_crossentropy", metrics=[
                         metrics.MeanSquaredError()])
     return model
