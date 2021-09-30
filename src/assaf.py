@@ -18,7 +18,7 @@ FILES = glob.glob(IMAGES_PATH)
 
 dae_model = get_autoencoder()
 dae_model.trainable = False
-dae_model.load_weights()
+dae_model.load_weights(DAE_WEIGHTS_PATH)
 
 
 
