@@ -193,7 +193,7 @@ history = siamese.fit(X_train, y_train,
         epochs=EPOCHS, 
         callbacks=[checkpoint],
         verbose=1)
-file_path = os.path.join(ASSAF_SAVE_PATH, f'training_{}{EMBEDDING_ALGORYTHM}_{LEVEL}_history.csv')
+file_path = os.path.join(ASSAF_SAVE_PATH, f'training_{EMBEDDING_ALGORYTHM}_{LEVEL}_history.csv')
 import pandas as pd
 hist_df = pd.DataFrame(history.history) 
 import win32file
